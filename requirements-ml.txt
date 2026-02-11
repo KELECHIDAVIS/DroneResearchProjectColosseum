@@ -1,0 +1,8 @@
+# Modern ML stack
+torch==2.1.2
+stable-baselines3==2.2.1
+gymnasium==0.29.1
+opencv-python==4.8.1.78
+pandas==2.1.4
+matplotlib==3.7.5
+cloudpickle==3.0.0

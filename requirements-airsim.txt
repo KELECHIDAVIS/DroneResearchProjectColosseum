@@ -1,0 +1,6 @@
+# AirSim legacy stack (DO NOT upgrade these)
+airsim==1.8.1
+numpy==1.23.5
+msgpack-python==0.5.6
+msgpack-rpc-python==0.4.1
+tornado==4.5.3
