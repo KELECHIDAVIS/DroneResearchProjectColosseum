@@ -1,2 +1,3 @@
 colosseum_rl_env/ 
 venv/
+precompiled_envs/
