@@ -20,10 +20,12 @@ print("state: %s" % s)
 state = client.getMultirotorState()
 print("state: %s" % pprint.pformat(state))
 
-client.moveToPositionAsync(10, 0, -10, 5).join()
-client.moveToPositionAsync(10, 10, -10, 5).join()
-client.moveToPositionAsync(0, 10, -10, 5).join()
-client.moveToPositionAsync(0, 0, -10, 5).join()
+client.takeoffAsync().join()
+for i in range (100): 
+    client.moveToPositionAsync(10, 0, -10, 5).join()
+    client.moveToPositionAsync(10, 10, -10, 5).join()
+    client.moveToPositionAsync(0, 10, -10, 5).join()
+    client.moveToPositionAsync(0, 0, -10, 5).join()
 
 
 
