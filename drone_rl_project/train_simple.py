@@ -117,8 +117,8 @@ env = DummyVecEnv([lambda: env])
 # ============================================================
 # MODEL SETUP
 # ============================================================
-import torch 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+import torch_directml
+device = torch_directml.device()
 print(f"Training on: {device}")
 
 model = PPO(
@@ -133,7 +133,7 @@ model = PPO(
     gamma=0.99,    # Discount factor for future rewards
     gae_lambda=0.95, # GAE lambda for advantage estimation
     clip_range=0.2,  # prevents too large updates to the policy (stabilizes training) 
-    ent_coef= 0.01 # Encourages exploration by adding a small bonus to the loss for having higher entropy (more randomness in action selection) 
+    ent_coef= 0.01, # Encourages exploration by adding a small bonus to the loss for having higher entropy (more randomness in action selection) 
     tensorboard_log="./logs/"
 )
 
@@ -141,7 +141,7 @@ model = PPO(
 # ============================================================
 # TRAINING
 # ============================================================
-
+total_timesteps = 100000 
 print("Starting training...")
 print("Watch the Blocks window to see the drone learning!")
 print(f"Training for {total_timesteps} steps...\n")
@@ -150,7 +150,7 @@ print(f"Training for {total_timesteps} steps...\n")
 progress_callback = TqdmCallback(total_timesteps)
 
 model.learn(
-    total_timesteps=100000,
+    total_timesteps=total_timesteps,
     # Total number of steps to train for.
 
     callback=progress_callback,

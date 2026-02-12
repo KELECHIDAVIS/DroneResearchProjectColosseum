@@ -1,5 +1,3 @@
 import torch
-
-# Add this to your train_simple.py to verify GPU is being used
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Training on: {device}")
+print(f"Is ROCm/CUDA available? {torch.cuda.is_available()}")
+print(f"Device Name: {torch.cuda.get_device_name(0)}")
