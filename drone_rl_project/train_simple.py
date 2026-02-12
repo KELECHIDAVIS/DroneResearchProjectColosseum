@@ -3,223 +3,199 @@
 # IMPORTS
 # ============================================================
 
-import setup_path         # Tells Python where to find the local AirSim library
-                          # that matches the Blocks binary version. MUST come
-                          # before importing airsim.
+import setup_path          # MUST come before `import airsim`
 
-from stable_baselines3 import PPO 
-
+from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
-# SB3 (Stable Baselines 3) requires environments to be "vectorized"
-# meaning it can run multiple environments in parallel.
-# DummyVecEnv wraps our single environment to satisfy this requirement.
-# Even though we only have 1 environment, we still need to wrap it.
+from stable_baselines3.common.callbacks import (
+    BaseCallback,
+    CallbackList,
+    CheckpointCallback,
+    EvalCallback,
+)
+# CallbackList    – run multiple callbacks together
+# CheckpointCallback – auto-save the model every N steps
+# EvalCallback    – periodically run the greedy policy and log mean reward;
+#                   this is what actually writes episode stats to TensorBoard
 
-from stable_baselines3.common.callbacks import BaseCallback
-# BaseCallback lets us create custom functions that run during training.
-# We'll use this to show a progress bar and log training stats.
+from stable_baselines3.common.monitor import Monitor
+# Monitor wraps the env and records episode reward/length in `info["episode"]`.
+# THIS IS THE KEY FIX FOR TENSORBOARD: SB3's built-in logger only writes
+# episode-level stats when it sees info["episode"], which Monitor provides.
+# Without Monitor, the tensorboard_log= folder is created but stays empty.
 
 from simple_obstacle_env import SimpleObstacleAvoidanceEnv
-# Our custom Gymnasium environment that wraps AirSim.
-# This is where the drone simulation lives.
 
 import time
-# Standard Python library for adding delays (time.sleep)
+from tqdm import tqdm
+
 
 # ============================================================
 # PROGRESS BAR CALLBACK
 # ============================================================
 
-from tqdm import tqdm
-# tqdm is the progress bar library. Install with: pip install tqdm
-# It wraps any iterable or can be manually updated to show progress.
-
 class TqdmCallback(BaseCallback):
-    # BaseCallback is SB3's way of letting you hook into the training loop.
-    # Methods like _on_training_start and _on_step are called automatically
-    # by SB3 at the right moments during training.
-
     def __init__(self, total_timesteps):
         super().__init__()
-        self.total_timesteps = total_timesteps
-        self.pbar = None
-        self.episode_rewards = []      # Track rewards per episode
-        self.current_episode_reward = 0
-        self.episode_count = 0
+        self.total_timesteps    = total_timesteps
+        self.pbar               = None
+        self.episode_rewards    = []
+        self.episode_count      = 0
 
     def _on_training_start(self):
-        # Called ONCE when training begins.
-        # We create the progress bar here with the total number of steps.
         self.pbar = tqdm(
             total=self.total_timesteps,
-            desc="Training",           # Label shown on the left
-            unit="steps",              # Unit label shown on the right
-            colour="green",            # Bar color
-            dynamic_ncols=True         # Adjusts to terminal width
+            desc="Training",
+            unit="steps",
+            colour="green",
+            dynamic_ncols=True,
         )
 
     def _on_step(self) -> bool:
         self.pbar.update(1)
-        
-        # PPO stores rewards differently than DQN
-        # Use infos instead of rewards
+
+        # Monitor puts episode stats in info["episode"] at episode end
         infos = self.locals.get("infos", [{}])
-        
-        if len(infos) > 0:
-            # Check for episode end info
-            if "episode" in infos[0]:
-                ep_reward = infos[0]["episode"]["r"]
-                self.episode_count += 1
-                self.episode_rewards.append(ep_reward)
-                
-                avg_reward = sum(self.episode_rewards[-10:]) / min(10, len(self.episode_rewards))
-                
-                self.pbar.set_postfix({
-                    "episode": self.episode_count,
-                    "ep_reward": f"{ep_reward:.1f}",
-                    "avg_reward": f"{avg_reward:.1f}"
-                })
-        
+        if infos and "episode" in infos[0]:
+            ep_reward = infos[0]["episode"]["r"]
+            self.episode_count += 1
+            self.episode_rewards.append(ep_reward)
+            avg = sum(self.episode_rewards[-10:]) / min(10, len(self.episode_rewards))
+            self.pbar.set_postfix(
+                episode=self.episode_count,
+                ep_reward=f"{ep_reward:.1f}",
+                avg10=f"{avg:.1f}",
+            )
         return True
-    
+
     def _on_training_end(self):
-        # Called ONCE when training finishes.
-        # Close the progress bar cleanly.
         self.pbar.close()
-        print(f"\nTraining complete! Total episodes: {self.episode_count}")
+        print(f"\nTraining complete!  Episodes: {self.episode_count}")
         if self.episode_rewards:
-            print(f"Best episode reward: {max(self.episode_rewards):.1f}")
-            print(f"Final avg reward (last 10): {sum(self.episode_rewards[-10:]) / min(10, len(self.episode_rewards)):.1f}")
+            print(f"  Best reward : {max(self.episode_rewards):.1f}")
+            print(f"  Last-10 avg : {sum(self.episode_rewards[-10:]) / min(10, len(self.episode_rewards)):.1f}")
 
 
 # ============================================================
-# ENVIRONMENT SETUP
+# ENVIRONMENT FACTORY
 # ============================================================
+# We use a factory function (make_env) rather than a raw lambda so
+# that each environment is independently wrapped with Monitor.
+# This pattern also makes it easy to swap to SubprocVecEnv later
+# if you want to run multiple AirSim instances in parallel.
 
-# total_timesteps = 10000
-# Total number of steps the drone will take during ALL of training.
-# Each "step" = one action taken in the environment.
-# 10,000 is small (quick demo). Real training might use 1,000,000+.
-
-print("Setting up environment...")
-
-env = SimpleObstacleAvoidanceEnv()
-# Creates an instance of our custom AirSim Gym environment.
-# This connects to the Blocks simulation.
-
-env = DummyVecEnv([lambda: env])
-# Wraps our environment in SB3's vectorized environment format.
-# The lambda: env syntax creates a function that returns our env.
-# DummyVecEnv expects a LIST of environment-creating functions,
-# which is why we pass [lambda: env] (a list with one function).
+def make_env(goal_x=50.0, log_dir="./monitor_logs/"):
+    def _init():
+        env = SimpleObstacleAvoidanceEnv(goal_x=goal_x)
+        # Monitor logs episode reward + length and injects info["episode"].
+        # log_dir=None means it only tracks in-memory (no extra CSV file
+        # written alongside your logs folder). Set a path if you want CSVs.
+        env = Monitor(env, filename=None)
+        return env
+    return _init
 
 
 # ============================================================
-# MODEL SETUP
+# MAIN SETUP
 # ============================================================
-# import torch_directml 
-# device = torch_directml.device()
-# print(f"Training on: {device}")
+
+TOTAL_TIMESTEPS = 70000   # Start here; bump to 1M+ for serious training
+GOAL_X          = 50.0
+LOG_DIR         = "./logs/"
+CHECKPOINT_DIR  = "./checkpoints/"
+
+print("Setting up environment…")
+
+# DummyVecEnv runs one environment synchronously.
+# The factory pattern is correct here: pass a list of callables, not instances.
+env = DummyVecEnv([make_env(goal_x=GOAL_X)])
+
+
+# ============================================================
+# MODEL
+# ============================================================
 
 model = PPO(
-    "CnnPolicy",  # Use a convolutional neural network (CNN) policy,
+    "CnnPolicy",
     env,
-    #device=device,  # Use GPU if available for faster training
-    verbose=0,    # 0 = no output, 1 = info, 2 = debug
-    learning_rate=3e-4,  # How quickly the model updates its knowledge each step
-    n_steps=512,
+    verbose=0,           # 0 = silent; set to 1 to see SB3's own log lines
+    learning_rate=3e-4,
+    n_steps=1024,        # Collect 1024 steps before each update.
+                         # With max_steps=500, this captures ~2 full episodes
+                         # per update, which stabilises the advantage estimates.
     batch_size=64,
-    n_epochs=10, 
-    gamma=0.99,    # Discount factor for future rewards
-    gae_lambda=0.95, # GAE lambda for advantage estimation
-    clip_range=0.2,  # prevents too large updates to the policy (stabilizes training) 
-    ent_coef= 0.01, # Encourages exploration by adding a small bonus to the loss for having higher entropy (more randomness in action selection) 
-    tensorboard_log="./logs/"
+    n_epochs=10,
+    gamma=0.99,
+    gae_lambda=0.95,
+    clip_range=0.2,
+    ent_coef=0.01,       # Small entropy bonus keeps exploration alive.
+                         # If the drone stops exploring, raise to 0.02-0.05.
+    tensorboard_log=LOG_DIR,
 )
+
+# ============================================================
+# CALLBACKS
+# ============================================================
+
+# 1. Auto-save every 25 k steps so you never lose a good run
+checkpoint_cb = CheckpointCallback(
+    save_freq=25_000,
+    save_path=CHECKPOINT_DIR,
+    name_prefix="obstacle_ppo",
+    verbose=1,
+)
+
+# 2. Progress bar in the terminal
+progress_cb = TqdmCallback(TOTAL_TIMESTEPS)
+
+# Combine all callbacks. Add EvalCallback here if you want a separate
+# eval env (requires a second AirSim connection or pausing the train env).
+callbacks = CallbackList([checkpoint_cb, progress_cb])
 
 
 # ============================================================
 # TRAINING
 # ============================================================
-total_timesteps = 100000 
-print("Starting training...")
-print("Watch the Blocks window to see the drone learning!")
-print(f"Training for {total_timesteps} steps...\n")
 
-# Create our progress bar callback
-progress_callback = TqdmCallback(total_timesteps)
+print("Starting training…")
+print(f"Goal: reach X = {GOAL_X} m")
+print(f"Steps: {TOTAL_TIMESTEPS:,}")
+print(f"TensorBoard: run `tensorboard --logdir {LOG_DIR}` in another terminal\n")
 
 model.learn(
-    total_timesteps=total_timesteps,
-    # Total number of steps to train for.
-
-    callback=progress_callback,
-    # Our custom callback that shows the progress bar and stats.
-
-    log_interval=1,
-    # How often (in episodes) to log training info.
-
+    total_timesteps=TOTAL_TIMESTEPS,
+    callback=callbacks,
+    log_interval=1,        # Log every episode (Monitor makes this meaningful)
     reset_num_timesteps=True,
-    # Whether to reset the step counter when calling learn().
-    # True = fresh start. False = continue from where we left off.
-    # Useful when continuing training: model.learn(..., reset_num_timesteps=False)
+    tb_log_name="blocks_ppo",   # Sub-folder name inside LOG_DIR
 )
 
-model.save("obstacle_avoidance_simple")
-# Saves the trained model weights to a file called "obstacle_avoidance_simple.zip"
-# Load it later with: model = DQN.load("obstacle_avoidance_simple")
+model.save("obstacle_avoidance_ppo")
+print("\nModel saved to obstacle_avoidance_ppo.zip")
 
 
 # ============================================================
-# QUICK TEST OF TRAINED MODEL
+# QUICK EVALUATION RUN
 # ============================================================
 
-print("\nTraining complete! Running quick test...")
-print("Watch the Blocks window to see the trained drone!\n")
+print("\nRunning evaluation episode…\n")
 
 obs = env.reset()
-# Reset the environment to start a fresh episode.
-# Returns the first observation (depth image from camera).
+total_reward = 0.0
 
-total_reward = 0
-
-for i in range(200):
-    # Run up to 200 steps to test the trained agent.
-
-    action, _states = model.predict(obs, deterministic=True)
-    # Ask the trained model: "Given this observation, what action should I take?"
-    # deterministic=True: always pick the BEST action (no randomness).
-    #                     During training, some randomness is used to explore.
-    #                     During testing, we want the best learned behavior.
-    # _states: only used for recurrent policies (like LSTM), not needed here.
-
+for i in range(300):
+    action, _ = model.predict(obs, deterministic=True)
     obs, reward, done, info = env.step(action)
-    # Execute the action in the environment.
-    # Returns:
-    #   obs    = new observation (next depth image)
-    #   reward = reward received for this step
-    #   done   = True if episode ended (collision or goal reached)
-    #   info   = extra info dict (we put position_x here)
-
-    total_reward += reward[0]  # reward is a list in VecEnv, take first element
-
-    time.sleep(0.1)
-    # Small delay so we can watch the drone move in Blocks.
-    # Remove this during actual training to speed things up.
+    total_reward += reward[0]
+    time.sleep(0.05)   # Slow down just enough to watch; remove to go faster
 
     if done[0]:
-        # done is also a list in VecEnv, check first element.
-        x_pos = info[0].get('position_x', 0)
-        print(f"Episode finished at step {i}!")
-        print(f"Final position X: {x_pos:.2f} meters")
-        print(f"Total reward: {total_reward:.1f}")
-
-        if x_pos >= 50:
-            print("SUCCESS! Drone reached the goal!")
-        else:
-            print("Drone didn't reach goal (collision or timeout)")
+        x_pos = info[0].get("position_x", 0)
+        print(f"Episode ended at step {i+1}")
+        print(f"  Final X  : {x_pos:.2f} m")
+        print(f"  Reward   : {total_reward:.1f}")
+        print(f"  Outcome  : {'GOAL REACHED' if x_pos >= GOAL_X else 'Did not reach goal'}")
         break
 
 env.close()
-# Cleanly close the environment and disconnect from AirSim.
-print("\nTest complete!")
+print("\nDone.")
