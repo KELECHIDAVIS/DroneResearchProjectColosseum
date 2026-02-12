@@ -120,7 +120,7 @@ model = PPO(
     env,
     verbose=0,           # 0 = silent; set to 1 to see SB3's own log lines
     learning_rate=3e-4,
-    n_steps=1024,        # Collect 1024 steps before each update.
+    n_steps=512,        # Collect 1024 steps before each update.
                          # With max_steps=500, this captures ~2 full episodes
                          # per update, which stabilises the advantage estimates.
     batch_size=64,
@@ -128,7 +128,7 @@ model = PPO(
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
-    ent_coef=0.02,       # Small entropy bonus keeps exploration alive.
+    ent_coef=0.05,       # Small entropy bonus keeps exploration alive.
                          # If the drone stops exploring, raise to 0.02-0.05.
     tensorboard_log=LOG_DIR,
 )

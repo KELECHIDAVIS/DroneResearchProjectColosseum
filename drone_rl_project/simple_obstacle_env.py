@@ -167,7 +167,7 @@ class SimpleObstacleAvoidanceEnv(gym.Env):
             # the optimal policy is always to move forward.
             # It also prevents the drone from just climbing forever,
             # because climbing costs steps without earning progress.
-            reward -= 0.2
+            reward -= 0.5
 
             # ── 3. Altitude penalty (soft constraint) ─────────────────
             # If the drone drifts too far from cruise altitude, nudge it
@@ -188,7 +188,7 @@ class SimpleObstacleAvoidanceEnv(gym.Env):
 
             # Only apply when something is actually close (below half range)
             # so it doesn't dominate in open areas
-            if mean_depth < 128:
+            if mean_depth < 128 and vx > 0:  # Only reward if moving forward
                 reward += (mean_depth / 128.0) * 1.5  # max +1.5 when clear, 0 when wall is right there
                 
             # ── 4. Goal bonus ─────────────────────────────────────────
