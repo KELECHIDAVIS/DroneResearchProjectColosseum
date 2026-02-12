@@ -117,14 +117,14 @@ env = DummyVecEnv([lambda: env])
 # ============================================================
 # MODEL SETUP
 # ============================================================
-import torch_directml
-device = torch_directml.device()
-print(f"Training on: {device}")
+# import torch_directml 
+# device = torch_directml.device()
+# print(f"Training on: {device}")
 
 model = PPO(
     "CnnPolicy",  # Use a convolutional neural network (CNN) policy,
     env,
-    device=device,  # Use GPU if available for faster training
+    #device=device,  # Use GPU if available for faster training
     verbose=0,    # 0 = no output, 1 = info, 2 = debug
     learning_rate=3e-4,  # How quickly the model updates its knowledge each step
     n_steps=512,
