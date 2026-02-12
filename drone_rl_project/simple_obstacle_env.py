@@ -74,54 +74,57 @@ class SimpleObstacleAvoidanceEnv(gym.Env):
     def step(self, action):
         self.current_step += 1
         
-        # Map discrete action to velocity
         velocity_map = {
             0: (2, 0, 0),    # forward
             1: (-2, 0, 0),   # backward
             2: (0, 2, 0),    # left
             3: (0, -2, 0),   # right
-            4: (0, 0, -1),   # up
-            5: (0, 0, 1),    # down
+            4: (0, 0, -2),   # up (negative Z = up in NED!)
+            5: (0, 0, 2),    # down
             6: (0, 0, 0)     # hover
         }
         
         vx, vy, vz = velocity_map[action]
-        
-        # Execute action
         self.client.moveByVelocityAsync(vx, vy, vz, duration=0.5).join()
         self.client.hoverAsync().join()
         
-        # Get current position
+        # Get current state
         state = self.client.getMultirotorState()
         pos = state.kinematics_estimated.position
         current_x = pos.x_val
+        current_z = pos.z_val  # Track altitude too!
         
         # Check collision
         collision = self.client.simGetCollisionInfo()
         
-        # Calculate reward
-        reward = 0
         done = False
+        reward = 0
         
         if collision.has_collided:
-            reward = -100
+            reward = -100           # Heavy penalty for collision
             done = True
         else:
-            # Reward for moving forward (toward goal)
-            progress = current_x - self.last_x
-            reward = progress * 10  # Scale up the reward
+            # 1. Reward for forward progress (main goal)
+            x_progress = current_x - self.last_x
+            reward += x_progress * 10
             
-            # Bonus for reaching goal
+            # 2. IMPORTANT: Small reward just for surviving each step
+            #    This encourages the drone to stay alive and keep trying
+            reward += 0.5
+            
+            
+            # 4. Bonus for reaching goal
             if current_x >= self.goal_x:
                 reward += 500
                 done = True
         
         self.last_x = current_x
         
-        # Timeout
         if self.current_step >= self.max_steps:
             done = True
         
         obs = self._get_obs()
-        
-        return obs, reward, done, False, {"position_x": current_x}
+        return obs, reward, done, False, {
+            "position_x": current_x,
+            "position_z": current_z
+        }

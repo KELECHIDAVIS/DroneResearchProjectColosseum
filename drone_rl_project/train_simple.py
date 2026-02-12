@@ -192,6 +192,19 @@ model = DQN(
     # How many steps between copying the main network to the target network.
     # More frequent = more stable reference but slower to propagate learning.
 
+    # ADD THESE for better exploration:
+    exploration_fraction=0.3,
+    # Spend 30% of training exploring randomly.
+    # Default is 0.1 (10%) which might not be enough
+    # to discover the "go up" strategy.
+
+    exploration_initial_eps=1.0,
+    # Start with 100% random actions (full exploration).
+
+    exploration_final_eps=0.05,
+    # End with 5% random actions (mostly using learned policy).
+    # This decay happens over exploration_fraction * total_timesteps steps.
+
     tensorboard_log="./logs/"
     # Where to save training metrics for visualization with TensorBoard.
     # Run: tensorboard --logdir ./logs/
