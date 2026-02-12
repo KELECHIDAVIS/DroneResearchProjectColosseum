@@ -25,7 +25,7 @@ class SimpleObstacleAvoidanceEnv(gym.Env):
         self,
         goal_x: float = 50.0,          # Target X position in meters
         cruise_altitude: float = -3.0,  # NED Z (negative = above ground)
-        altitude_tolerance: float = 2.0,# How far from cruise alt before penalty
+        altitude_tolerance: float = 6,# How far from cruise alt before penalty
         x_min: float = -5.0,           # Kill zone: too far backward
         max_steps: int = 200,          # Max steps per episode (safety kill switch) 
     ):
@@ -137,6 +137,9 @@ class SimpleObstacleAvoidanceEnv(gym.Env):
         current_z = pos.z_val   # NED altitude (negative = above ground)
         collision = self.client.simGetCollisionInfo()
 
+        #get observation for reward shaping 
+        obs = self._get_obs()
+        
         # ---- Reward shaping ------------------------------------------
         done   = False
         reward = 0.0
@@ -174,6 +177,20 @@ class SimpleObstacleAvoidanceEnv(gym.Env):
             if alt_error > self.altitude_tolerance:
                 reward -= (alt_error - self.altitude_tolerance) * 1.0
 
+            # ── 5. Clearance bonus from depth image ──────────────────────
+            # The center region of the depth image represents what's directly
+            # ahead. Reward open space, penalise being close to something.
+            # This gives a gradient BEFORE collision, not just after.
+            
+            obs_for_reward = obs  # Already called below, so refactor to cache it
+            center = obs_for_reward[30:54, 30:54, 0].astype(np.float32)  # 24x24 centre crop
+            mean_depth = center.mean()  # 0=very close, 255=open space
+
+            # Only apply when something is actually close (below half range)
+            # so it doesn't dominate in open areas
+            if mean_depth < 128:
+                reward += (mean_depth / 128.0) * 1.5  # max +1.5 when clear, 0 when wall is right there
+                
             # ── 4. Goal bonus ─────────────────────────────────────────
             if current_x >= self.goal_x:
                 reward += 500.0
@@ -184,7 +201,7 @@ class SimpleObstacleAvoidanceEnv(gym.Env):
         if self.current_step >= self.max_steps:
             done = True
 
-        obs = self._get_obs()
+        
         return obs, reward, done, False, {
             "position_x": current_x,
             "position_z": current_z,

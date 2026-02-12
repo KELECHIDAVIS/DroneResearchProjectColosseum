@@ -99,7 +99,7 @@ def make_env(goal_x=50.0, log_dir="./monitor_logs/"):
 # MAIN SETUP
 # ============================================================
 
-TOTAL_TIMESTEPS = 70000   # Start here; bump to 1M+ for serious training
+TOTAL_TIMESTEPS = 50000   # Start here; bump to 1M+ for serious training
 GOAL_X          = 50.0
 LOG_DIR         = "./logs/"
 CHECKPOINT_DIR  = "./checkpoints/"
@@ -128,7 +128,7 @@ model = PPO(
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
-    ent_coef=0.01,       # Small entropy bonus keeps exploration alive.
+    ent_coef=0.02,       # Small entropy bonus keeps exploration alive.
                          # If the drone stops exploring, raise to 0.02-0.05.
     tensorboard_log=LOG_DIR,
 )
@@ -139,7 +139,7 @@ model = PPO(
 
 # 1. Auto-save every 25 k steps so you never lose a good run
 checkpoint_cb = CheckpointCallback(
-    save_freq=25_000,
+    save_freq=12500,  #  (adjust as needed)
     save_path=CHECKPOINT_DIR,
     name_prefix="obstacle_ppo",
     verbose=1,
